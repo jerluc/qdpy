@@ -13,9 +13,6 @@ setup(
     author_email='jeremyalucas@gmail.com',
     url='https://github.com/jerluc/qdpy',
     packages=['qdpy'],
-    entry_points={
-        'console_scripts': ['qdpy=qdpy.__main__:main'],
-    },
     install_requires=[l.strip() for l in open('requirements.txt')],
     license='License :: OSI Approved :: Apache Software License',
 )
