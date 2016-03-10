@@ -53,7 +53,7 @@ def start_server(ipython, groups=[]):
     peer = _ENV['peer']
     host, port = peer.addr
     output('Started QDPY code server @ %s:%d', host, port)
-    output('Joined network groups %s as peer [%s]', peer.groups, peer.id)
+    output('Will join network groups as peer [%s]', peer.id)
     return t
 
 def _start_server(groups):
@@ -83,13 +83,14 @@ def stop_server():
 def update_ns():
     code = dump_ns()
     # TODO: Scope each code update to the group somehow
-    for peer_id, peer in _ENV['peer'].peers.iteritems():
+    for peer_id, peer in _ENV['peer'].get_peers().iteritems():
         endpoint = 'http://%s:%d/code' % peer['addr']
         try:
             HTTPClient().fetch(endpoint, method='PUT', body=code)
         except:
-            # TODO: Have some kind of separate healthchecking loop?
-            _ENV['peer'].unhealthy_peer(peer_id)
+            # TODO: For now, we don't do anything anymore, but maybe that call to `unhealthy_peer`
+            # is still warranted?
+            pass
 
 
 def join_group(group):
@@ -102,7 +103,7 @@ def leave_group(group):
 
 
 def list_peers(_):
-    for peer_id, peer in _ENV['peer'].peers.iteritems():
+    for peer_id, peer in _ENV['peer'].get_peers().iteritems():
         output('[%s] => %s:%d', peer_id, peer['addr'][0], peer['addr'][1])
 
 

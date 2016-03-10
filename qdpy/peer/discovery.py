@@ -7,7 +7,7 @@ from urlparse import urlsplit
 
 
 _MAX_HEALTH = 5
-_PEER_HEALTH_INTERVAL = 1000 * 2
+_PEER_HEALTH_INTERVAL = 1.5
 _GROUP_ADDR = ('224.0.0.1', 9999)
 _ADVERTISE_INTERVAL = 1000 * 1
 _1KB = 1024 * 1
@@ -83,35 +83,43 @@ class Peer(object):
 
     def track_peer(self, peer_id):
         def tracker():
-            self.unhealthy_peer(peer_id)
-        tracker = tornado.ioloop.PeriodicCallback(tracker, _PEER_HEALTH_INTERVAL)
-        tracker.start()
+            self.unhealthy_peer(peer_id, self.track_peer)
+        self.ioloop.call_later(_PEER_HEALTH_INTERVAL, tracker)
 
 
-    def unhealthy_peer(self, peer_id):
-        def remover():
+    def unhealthy_peer(self, peer_id, continuer):
+        def checker():
             if peer_id in self.peers:
                 peer = self.peers[peer_id]
                 peer['health'] -= 1
-                if peer['health'] == 0:
+                if not peer['group'] in self.groups or peer['health'] == 0:
                     del self.peers[peer_id]
                     print('Removed peer [%s]' % peer_id)
-        self.ioloop.add_callback(remover)
+                else:
+                    continuer(peer_id)
+        self.ioloop.add_callback(checker)
 
     def on_peer(self, _not, _used):
         data, _ = self.socket.recvfrom(_1KB)
         peer_group, peer_id, peer_ip, peer_port = parse_payload(data)
-        # TODO: Scopre each peer to a given group
-        if peer_group in self.groups and peer_id != self.id and peer_id not in self.peers:
+        # TODO: Scope each peer to a given group
+        if peer_group in self.groups and peer_id != self.id and peer_id not in self.get_peers():
+            # TODO: Allow for more than one group per peer since this would actually be bad if a
+            # peer belongs more than one group at a time as this call would then overwrite with
+            # the last joined group for that peer (or last broadcasted)
             self.peers[peer_id] = {
+                'group': peer_group,
                 'addr': (peer_ip, peer_port),
                 'health': _MAX_HEALTH
             }
             self.track_peer(peer_id)
             print('Added new peer [%s]' % peer_id)
-        elif peer_id in self.peers:
+        elif peer_id in self.get_peers():
             if self.peers[peer_id]['health'] < _MAX_HEALTH:
                 self.peers[peer_id]['health'] += 1
+
+    def get_peers(self):
+        return {id: peer for id, peer in self.peers.iteritems() if peer['group'] in self.groups}
 
     def advertise(self):
         for group in self.groups:
