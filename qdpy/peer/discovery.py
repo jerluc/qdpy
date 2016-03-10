@@ -6,7 +6,7 @@ import uuid
 from urlparse import urlsplit
 
 
-_GROUP_ADDR = ('228.0.0.4', 50007)
+_GROUP_ADDR = ('224.0.0.1', 9999)
 _ADVERTISE_INTERVAL = 1000 * 2
 _1KB = 1024 * 1
 
