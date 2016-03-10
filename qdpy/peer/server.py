@@ -6,7 +6,7 @@ import tornado.web
 from tornado.httpclient import HTTPClient
 from tornado.httpserver import HTTPServer
 from qdpy.marshal import loads, dumps
-from qdpy.peer.discovery import Peer, gethostname
+from qdpy.peer.discovery import *
 
 
 _CODE_BROADCAST_INTERVAL = 1000 * 1
@@ -56,6 +56,16 @@ def start_server(ipython, groups=[]):
     output('Will join network groups as peer [%s]', peer.id)
     return t
 
+def on_event(event_type, **kwargs):
+    if event_type == JOIN_GROUP:
+        output('Joined group [%s]', kwargs['group'])
+    if event_type == LEAVE_GROUP:
+        output('Left group [%s]', kwargs['group'])
+    if event_type == NEW_PEER:
+        output('Added peer [%s]', kwargs['id'])
+    if event_type == REMOVE_PEER:
+        output('Removed peer [%s]', kwargs['id'])
+
 def _start_server(groups):
     global _ENV
     app = tornado.web.Application([
@@ -67,7 +77,7 @@ def _start_server(groups):
     socket = filter(lambda s: s.getsockname()[0] == '0.0.0.0', sockets)[0]
     host = gethostname()
     port = socket.getsockname()[1]
-    peer = Peer((host, port), groups=groups)
+    peer = Peer((host, port), groups=groups, event_handler=on_event)
     _ENV['peer'] = peer
     peer.start()
     updater = tornado.ioloop.PeriodicCallback(update_ns, _CODE_BROADCAST_INTERVAL)

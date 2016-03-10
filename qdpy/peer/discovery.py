@@ -6,6 +6,12 @@ import uuid
 from urlparse import urlsplit
 
 
+JOIN_GROUP = 1
+LEAVE_GROUP = 2
+NEW_PEER = 3
+EXISTING_PEER = 4
+REMOVE_PEER = 5
+
 _MAX_HEALTH = 5
 _PEER_HEALTH_INTERVAL = 1.5
 _GROUP_ADDR = ('224.0.0.1', 9999)
@@ -36,19 +42,32 @@ def create_payload(peer_group, peer_id, peer_ip, peer_port):
 
 
 class Peer(object):
-    def __init__(self, addr, ioloop=None, groups=[]):
+    def __init__(self, addr, ioloop=None, groups=[], event_handler=None):
         self.id = str(uuid.uuid4())
         self.groups = groups[:]
         self.peers = {}
         self.addr = addr
         self.ioloop = ioloop if ioloop is not None else tornado.ioloop.IOLoop.instance()
         self._socket = None
+        self.event_handler = event_handler
+
+    def notify_event(self, event_type, **kwargs):
+        if self.event_handler:
+            self.event_handler(event_type, **kwargs)
 
     def join(self, group):
-        self.ioloop.add_callback(self.groups.append, group)
+        def adder():
+            if group not in self.groups:
+                self.groups.append(group)
+                self.notify_event(JOIN_GROUP, group=group)
+        self.ioloop.add_callback(adder)
 
     def leave(self, group):
-        self.ioloop.add_callback(self.groups.remove, group)
+        def remover():
+            if group in self.groups:
+                self.groups.remove(group)
+                self.notify_event(LEAVE_GROUP, group=group)
+        self.ioloop.add_callback(remover)
 
     @property
     def socket(self):
@@ -94,7 +113,7 @@ class Peer(object):
                 peer['health'] -= 1
                 if not peer['group'] in self.groups or peer['health'] == 0:
                     del self.peers[peer_id]
-                    print('Removed peer [%s]' % peer_id)
+                    self.notify_event(REMOVE_PEER, id=peer_id, peer=peer)
                 else:
                     continuer(peer_id)
         self.ioloop.add_callback(checker)
@@ -113,10 +132,11 @@ class Peer(object):
                 'health': _MAX_HEALTH
             }
             self.track_peer(peer_id)
-            print('Added new peer [%s]' % peer_id)
+            self.notify_event(NEW_PEER, id=peer_id, peer=self.peers[peer_id])
         elif peer_id in self.get_peers():
             if self.peers[peer_id]['health'] < _MAX_HEALTH:
                 self.peers[peer_id]['health'] += 1
+            self.notify_event(EXISTING_PEER, id=peer_id, peer=self.peers[peer_id])
 
     def get_peers(self):
         return {id: peer for id, peer in self.peers.iteritems() if peer['group'] in self.groups}
