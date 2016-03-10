@@ -6,8 +6,10 @@ import uuid
 from urlparse import urlsplit
 
 
+_MAX_HEALTH = 5
+_PEER_HEALTH_INTERVAL = 1000 * 2
 _GROUP_ADDR = ('224.0.0.1', 9999)
-_ADVERTISE_INTERVAL = 1000 * 2
+_ADVERTISE_INTERVAL = 1000 * 1
 _1KB = 1024 * 1
 
 
@@ -78,19 +80,38 @@ class Peer(object):
         self._advertiser = tornado.ioloop.PeriodicCallback(self.advertise, _ADVERTISE_INTERVAL)
         self._advertiser.start()
 
-    def remove_peer(self, peer_id):
+
+    def track_peer(self, peer_id):
+        def tracker():
+            self.unhealthy_peer(peer_id)
+        tracker = tornado.ioloop.PeriodicCallback(tracker, _PEER_HEALTH_INTERVAL)
+        tracker.start()
+
+
+    def unhealthy_peer(self, peer_id):
         def remover():
             if peer_id in self.peers:
-                print('Removing peer [%s]' % peer_id)
-                del self.peers[peer_id]
+                peer = self.peers[peer_id]
+                peer['health'] -= 1
+                if peer['health'] == 0:
+                    del self.peers[peer_id]
+                    print('Removed peer [%s]' % peer_id)
         self.ioloop.add_callback(remover)
 
     def on_peer(self, _not, _used):
         data, _ = self.socket.recvfrom(_1KB)
         peer_group, peer_id, peer_ip, peer_port = parse_payload(data)
+        # TODO: Scopre each peer to a given group
         if peer_group in self.groups and peer_id != self.id and peer_id not in self.peers:
-            print('Adding new peer [%s]' % peer_id)
-            self.peers[peer_id] = (peer_ip, peer_port)
+            self.peers[peer_id] = {
+                'addr': (peer_ip, peer_port),
+                'health': _MAX_HEALTH
+            }
+            self.track_peer(peer_id)
+            print('Added new peer [%s]' % peer_id)
+        elif peer_id in self.peers:
+            if self.peers[peer_id]['health'] < _MAX_HEALTH:
+                self.peers[peer_id]['health'] += 1
 
     def advertise(self):
         for group in self.groups:

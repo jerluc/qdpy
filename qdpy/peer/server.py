@@ -1,4 +1,5 @@
 import json
+import threading
 import tornado.ioloop
 import tornado.netutil
 import tornado.web
@@ -8,7 +9,9 @@ from qdpy.marshal import loads, dumps
 from qdpy.peer.discovery import Peer, gethostname
 
 
-_env = {
+_CODE_BROADCAST_INTERVAL = 1000 * 1
+_KRAKEN = threading.Semaphore(0)
+_ENV = {
   'ipython': None,
   'initial_keys': [],
   'peer': None
@@ -16,29 +19,45 @@ _env = {
 
 
 def filter_keys(items):
-    return filter(lambda i: i[0] not in _env['initial_keys'] and not i[0].startswith('_'), items)
+    return filter(lambda i: i[0] not in _ENV['initial_keys'] and not i[0].startswith('_'), items)
 
 
 def dump_ns():
-    code = {k: v for k, v in filter_keys(_env['ipython'].user_ns.iteritems())}
+    code = {k: v for k, v in filter_keys(_ENV['ipython'].user_ns.iteritems())}
     code = {k: dumps(v) for k, v in code.iteritems()}
     return json.dumps(code)
 
 
 class CodeNamespaceHandler(tornado.web.RequestHandler):
-    def get(self):
-        self.write(dump_ns())
-    
     def put(self):
         code = json.loads(self.request.body)
         code = {k: loads(v) for k, v in filter_keys(code.iteritems())}
-        _env['ipython'].user_ns.update(code)
+        # TODO: Convert to use some more sophisticated dictionary
+        # like an append-only or log-ephemeral value storage mechanism
+        # much like what Rift hopes to accomplish with time/space/context
+        _ENV['ipython'].user_ns.update(code)
 
 
-def start_server(ipython, group):
-    global _env
-    _env['ipython'] = ipython
-    _env['initial_keys'] = ipython.user_ns.keys()
+def output(msg, *args):
+    _ENV['ipython'].write((msg % args) + '\n')
+
+
+def start_server(ipython, groups=[]):
+    global _ENV
+    _ENV['ipython'] = ipython
+    _ENV['initial_keys'] = ipython.user_ns.keys()
+    t = threading.Thread(target=_start_server, args=(groups,))
+    t.daemon = True
+    t.start()
+    _KRAKEN.acquire()
+    peer = _ENV['peer']
+    host, port = peer.addr
+    output('Started QDPY code server @ %s:%d', host, port)
+    output('Joined network groups %s as peer [%s]', peer.groups, peer.id)
+    return t
+
+def _start_server(groups):
+    global _ENV
     app = tornado.web.Application([
 	(r'/code', CodeNamespaceHandler),
     ])
@@ -48,11 +67,12 @@ def start_server(ipython, group):
     socket = filter(lambda s: s.getsockname()[0] == '0.0.0.0', sockets)[0]
     host = gethostname()
     port = socket.getsockname()[1]
-    peer = Peer((host, port), groups=[group])
-    _env['peer'] = peer
+    peer = Peer((host, port), groups=groups)
+    _ENV['peer'] = peer
     peer.start()
-    updater = tornado.ioloop.PeriodicCallback(update_ns, 2000)
+    updater = tornado.ioloop.PeriodicCallback(update_ns, _CODE_BROADCAST_INTERVAL)
     updater.start()
+    _KRAKEN.release()
     tornado.ioloop.IOLoop.instance().start()
 
 
@@ -62,9 +82,27 @@ def stop_server():
 
 def update_ns():
     code = dump_ns()
-    for peer_id, peer in _env['peer'].peers.iteritems():
-        endpoint = 'http://%s:%d/code' % peer
+    # TODO: Scope each code update to the group somehow
+    for peer_id, peer in _ENV['peer'].peers.iteritems():
+        endpoint = 'http://%s:%d/code' % peer['addr']
         try:
             HTTPClient().fetch(endpoint, method='PUT', body=code)
         except:
-            _env['peer'].remove_peer(peer_id)
+            # TODO: Have some kind of separate healthchecking loop?
+            _ENV['peer'].unhealthy_peer(peer_id)
+
+
+def join_group(group):
+    _ENV['ipython']
+    _ENV['peer'].join(group)
+
+
+def leave_group(group):
+    _ENV['peer'].leave(group)
+
+
+def list_peers(_):
+    for peer_id, peer in _ENV['peer'].peers.iteritems():
+        output('[%s] => %s:%d', peer_id, peer['addr'][0], peer['addr'][1])
+
+
