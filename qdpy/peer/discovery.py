@@ -78,10 +78,18 @@ class Peer(object):
         self._advertiser = tornado.ioloop.PeriodicCallback(self.advertise, _ADVERTISE_INTERVAL)
         self._advertiser.start()
 
+    def remove_peer(self, peer_id):
+        def remover():
+            if peer_id in self.peers:
+                print('Removing peer [%s]' % peer_id)
+                del self.peers[peer_id]
+        self.ioloop.add_callback(remover)
+
     def on_peer(self, _not, _used):
         data, _ = self.socket.recvfrom(_1KB)
         peer_group, peer_id, peer_ip, peer_port = parse_payload(data)
-        if peer_group in self.groups and peer_id != self.id:
+        if peer_group in self.groups and peer_id != self.id and peer_id not in self.peers:
+            print('Adding new peer [%s]' % peer_id)
             self.peers[peer_id] = (peer_ip, peer_port)
 
     def advertise(self):

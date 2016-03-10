@@ -62,7 +62,9 @@ def stop_server():
 
 def update_ns():
     code = dump_ns()
-    for _, peer in _env['peer'].peers.iteritems():
+    for peer_id, peer in _env['peer'].peers.iteritems():
         endpoint = 'http://%s:%d/code' % peer
-        HTTPClient().fetch(endpoint, method='PUT', body=code)
-
+        try:
+            HTTPClient().fetch(endpoint, method='PUT', body=code)
+        except:
+            _env['peer'].remove_peer(peer_id)
