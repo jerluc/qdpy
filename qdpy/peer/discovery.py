@@ -119,7 +119,11 @@ class Peer(object):
         self.ioloop.add_callback(checker)
 
     def on_peer(self, _not, _used):
-        data, _ = self.socket.recvfrom(_1KB)
+        try:
+            data, _ = self.socket.recvfrom(_1KB)
+        except:
+            # TODO: What now?
+            return
         peer_group, peer_id, peer_ip, peer_port = parse_payload(data)
         # TODO: Scope each peer to a given group
         if peer_group in self.groups and peer_id != self.id and peer_id not in self.get_peers():
@@ -145,4 +149,8 @@ class Peer(object):
         for group in self.groups:
             host, port = self.addr
 	    data = create_payload(group, self.id, host, port)
-	    self.socket.sendto(data, _GROUP_ADDR)
+            try:
+	        self.socket.sendto(data, _GROUP_ADDR)
+            except:
+                # TODO: Is there anything special to be done here?
+                pass
